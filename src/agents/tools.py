@@ -23,7 +23,7 @@ def search_player_tactical_tool(player_name: str) -> str:
 
 @tool
 def discovery_scout_tool(
-    *,  # 💡 THIS MAGIC ASTERISK FORCES KEYWORD-ONLY ARGUMENTS
+    *,
     position: str = None, 
     max_value_millions: float = None, 
     target_metric: str = None, 
