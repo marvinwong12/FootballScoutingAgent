@@ -1,0 +1,3 @@
+[submodule "SoccerAPI"]
+	path = SoccerAPI
+	url = https://github.com/JohnComonitski/SoccerAPI.git
