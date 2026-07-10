@@ -1,82 +1,105 @@
-"""
-AI Tools Module
-Provides specialized data endpoints for tactical, financial, and behavioral analysts.
-"""
+import unicodedata
+import pandas as pd
+import chromadb
+from chromadb.utils import embedding_functions
+from langchain.tools import tool
+from src.engine.scout_engine import ScoutEngine 
 
-from langchain_core.tools import tool
-from src.engine import ScoutEngine
-import random  # Used for simulated data where live APIs aren't integrated yet
-
+# Instantiate the global engine instance that your tools use
 _engine = ScoutEngine()
 
 # ==========================================
-# 1. TACTICAL ANALYST TOOLS
+# UNIVERSAL HELPER (Fast Lookup)
+# ==========================================
+def normalize_name(name: str) -> str:
+    """Instantly reduces any player name variation to a clean search key."""
+    if not isinstance(name, str): 
+        return str(name)
+    return unicodedata.normalize('NFKD', name).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+
+
+# ==========================================
+# 1. DATA ENGINE TOOLS (Structured Analytics)
 # ==========================================
 @tool
 def search_player_tactical_tool(player_name: str) -> str:
     """
-    Fetches purely tactical statistics, expected metrics, and defensive tracking.
-    Now includes both raw total volumes and normalized per-90 rate metrics.
+    Searches the database for a specific player's statistical profile.
     """
-    profile = _engine.lookup_player(player_name)
-    return str(profile)
+    try:
+        # Load the database (which now has the pre-computed 'match_name' column)
+        df = pd.read_csv("./scout_cache/master_scouting_data.csv")
+        
+        # Normalize ONLY the LLM's input (instantaneous)
+        clean_search_name = normalize_name(player_name)
+        
+        # Direct lookup! No expensive apply() functions needed.
+        player_data = df[df['match_name'] == clean_search_name]
+        
+        if player_data.empty:
+            return f"Could not find any data for {player_name}."
+            
+        # Clean up the output so the LLM doesn't get confused by duplicate name columns
+        player_data = player_data.drop(columns=['match_name'])
+        
+        return player_data.to_json(orient="records")
+        
+    except Exception as e:
+        return f"Error reading database: {str(e)}"
+
 
 @tool
 def discovery_scout_tool(
     *,
     position: str = None, 
     max_value_millions: float = None, 
+    max_wage: float = None,  
+    max_age: int = None,
     target_metric: str = None, 
     min_metric_value: float = None,
     sort_by_metric: str = "xg_per90",
     highest_first: bool = True
 ) -> str:
     """
-    Scans the global big-5 league database to discover players matching budget, position, 
-    and custom performance/tactical metrics.
+    Scans the global database to discover players matching budget, role, age, and wage limits.
 
     Args:
-        position (str): Target role on the pitch (e.g., 'FW', 'MF', 'DF', 'S' for striker).
-        max_value_millions (float): Maximum transfer market budget ceiling in millions of Euros (e.g., 30.0).
-        target_metric (str): Optional per-90 stat column to apply a floor filter to. 
-                             Choose from: 'goals_per90', 'xg_per90', 'assists_per90', 'key_passes_per90', 
-                             'shots_per90', 'performance_tklw_per90', 'performance_int_per90', 'ball_recoveries_per90'.
-        min_metric_value (float): The minimum value threshold for the chosen target_metric.
-        sort_by_metric (str): The metric used to rank the results. Defaults to 'xg_per90' for attacking efficiency.
-        highest_first (bool): Set to True to get the best performers first. Defaults to True.
+        position (str): Target role on the pitch (e.g., 'FW', 'MF', 'DF').
+        max_value_millions (float): Maximum transfer market budget ceiling in millions (e.g., 30.0).
+        max_wage (float): Maximum annual wage budget in Euros (e.g., 4000000).
+        max_age (int): Maximum player age ceiling (e.g., 25).
     """
-    print(f"[Tool Execution] Scanning market for {position} under €{max_value_millions}M (Sorting by {sort_by_metric})...")
-    
-    # 1. Build the dynamic filter matrix safely
     query_filters = {}
-    if position: 
-        query_filters['position'] = position
-    if max_value_millions: 
-        query_filters['max_value_mln'] = max_value_millions
+    if position: query_filters['position'] = position
+    if max_value_millions: query_filters['max_value_mln'] = max_value_millions
+    if max_wage: query_filters['max_wage'] = max_wage
+    if max_age: query_filters['max_age'] = max_age
         
-    # Mapping old custom filters dynamically to our unified engine keys
+    # Mapping custom filters dynamically to our unified engine keys
     if target_metric and min_metric_value is not None:
         metric_key = target_metric.lower().strip()
-        # If the LLM forgets to include the '_per90' suffix, append it defensively
-        if not metric_key.endswith('_per90') and metric_key not in ['market_value_mln', 'contract_expiry']:
+        
+        # Financial and core demographic markers do not get a suffix
+        exempt_base_columns = ['market_value_mln', 'contract_expiry', 'annual_wage_eur', 'weekly_wage_eur', 'age']
+        if not metric_key.endswith('_per90') and metric_key not in exempt_base_columns:
             metric_key = f"{metric_key}_per90"
             
-        # Inject our generic filter key into the filter dictionary
         if 'goals_per90' in metric_key:
             query_filters['min_goals_per90'] = min_metric_value
         elif 'xg_per90' in metric_key:
             query_filters['min_xg_per90'] = min_metric_value
         else:
-            # Let the engine naturally catch other dynamic per-90 thresholds
             query_filters[f"min_{metric_key}"] = min_metric_value
 
-    # 2. Enforce clean sorting metrics
+    # Enforce clean sorting metrics
     sort_column = sort_by_metric.lower().strip()
-    if not sort_column.endswith('_per90') and sort_column not in ['market_value_mln', 'contract_expiry', 'minutes']:
+    exempt_sort_columns = ['market_value_mln', 'contract_expiry', 'minutes', 'annual_wage_eur', 'age']
+    
+    if not sort_column.endswith('_per90') and sort_column not in exempt_sort_columns:
         sort_column = f"{sort_column}_per90"
 
-    # 3. Query the data engine using our per-90 structures
-    # We invert 'highest_first' to match pandas' 'ascending' logic (True highest = ascending=False)
+    # Query the engine. Note: The engine should be returning data with the 
+    # 'match_name' column dropped or kept for display, but lookup is handled via the underlying DataFrame.
     matches = _engine.discover_players(
         filters=query_filters, 
         sort_by=sort_column, 
@@ -84,48 +107,63 @@ def discovery_scout_tool(
         limit=3
     )
     
+    # LOOP BREAKER: Defensively halt recursive hallucination loops if zero data is found
     if not matches or isinstance(matches, str) or len(matches) == 0:
-        return f"No players in the current database match those exact filters (Tried searching for {query_filters} sorted by {sort_column})."
+        return (
+            "CRITICAL: No players matching your exact tactical or financial constraints "
+            "were found in the database. Do not attempt this query again. Report directly "
+            "to the user that zero players matched these specific limits."
+        )
         
     return str(matches)
-# ==========================================
-# 2. FINANCIAL ANALYST TOOLS
-# ==========================================
-@tool
-def check_player_financials_tool(player_name: str) -> str:
-    """Retrieves estimated market value, weekly wages, and contract length for a player."""
-    # Production note: Hook this up to a Transfermarkt/Capology scraper wrapper later
-    mock_values = {
-        "Pedro Neto": {"market_value": "£28M", "weekly_wage": "£90k", "contract": "2029"},
-        "Nico Williams": {"market_value": "£55M", "weekly_wage": "£140k", "contract": "2027"},
-        "Michael Olise": {"market_value": "£45M", "weekly_wage": "£120k", "contract": "2028"}
-    }
-    data = mock_values.get(player_name, {"market_value": "Under £30M (Estimated)", "weekly_wage": "Unknown", "contract": "Unknown"})
-    return f"Financial Dossier for {player_name}: {data}"
+
 
 # ==========================================
-# 3. BEHAVIORAL ANALYST TOOLS (The RAG / Search Component)
+# 2. BEHAVIORAL ANALYST TOOLS (The RAG Component)
 # ==========================================
 @tool
-def retrieve_player_background_rag_tool(player_name: str) -> str:
+def query_player_narrative_tool(player_name: str) -> str:
     """
-    Queries our Vector Store containing scraped media articles, press conferences, 
-    and dressing room reports regarding a player's character, chemistry, and personal life.
+    Retrieves qualitative scouting insights, medical/injury history, 
+    character assessments, and tactical profiles for a specific football player.
+    Always query this tool to check for background risks after finding potential targets.
     """
-    # This is where your RAG embedding lookup goes.
-    print(f"[RAG Retrieval] Searching vector database for media background on: {player_name}")
-    rag_vault = {
-        "Pedro Neto": "Extremely dedicated professional. Highly regarded by managers for dressing room chemistry, though has documented frustration during extended hamstring injury rehabilitations.",
-        "Nico Williams": "Very grounded personality, deeply family-oriented. Maintains exceptional locker room chemistry and shows high emotional intelligence in interviews.",
-        "Michael Olise": "Reserved and introverted character. Prefers to let his football talk; zero off-pitch controversies, adapts well to strict structural tactics."
-    }
-    return rag_vault.get(player_name, "Local media files indicate a stable personal life with no major disciplinary infractions or negative chemistry reports.")
+    try:
+        # Connect to the local database
+        chroma_client = chromadb.PersistentClient(path="./scout_cache/vector_db")
+        embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+        collection = chroma_client.get_collection(name="player_narratives", embedding_function=embedding_fn)
+        
+        # THE ARCHITECTURE FIX: One instant normalization on the incoming target parameter
+        clean_search_name = normalize_name(player_name)
+        
+        # Query matching the exact pre-calculated identity key stored during ingestion
+        results = collection.get(
+            where={"player_match_name": clean_search_name}
+        )
+        
+        if results and results['documents'] and len(results['documents']) > 0:
+            return f"--- QUALITATIVE SCOUTING REPORT FOR {player_name.upper()} ---\n{results['documents'][0]}"
+            
+        # Semantic fallback: If metadata misses, evaluate similarity against the pre-compiled lookup key
+        semantic_results = collection.query(
+            query_texts=[f"injury history tactical character profile for {clean_search_name}"],
+            n_results=1
+        )
+        if semantic_results and semantic_results['documents'] and len(semantic_results['documents'][0]) > 0:
+            return f"--- RELATED NARRATIVE MATCH FOR {player_name.upper()} ---\n{semantic_results['documents'][0][0]}"
+            
+        return f"No qualitative injury or character reports found in local text database for '{player_name}'."
+        
+    except Exception as e:
+        return f"Error querying local vector storage: {str(e)}"
+
 
 # ==========================================
 # TOOL REGISTRATION MATRIX
 # ==========================================
-# Group your functions into the exact list variable the Supervisor imports
 SCOUT_TOOLS = [
-search_player_tactical_tool,
-discovery_scout_tool
+    search_player_tactical_tool,
+    discovery_scout_tool,
+    query_player_narrative_tool
 ]
