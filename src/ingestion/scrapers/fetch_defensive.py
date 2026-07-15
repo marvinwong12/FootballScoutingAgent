@@ -6,7 +6,7 @@ import time
 def ingest_unified_defensive_data(season="2526"):
     print(f"--- STARTING UNIFIED DEFENSIVE INGESTION FOR THE {season} SEASON ---")
     
-    storage_dir = "./scout_cache"
+    storage_dir = "./data/scout_cache"
     os.makedirs(storage_dir, exist_ok=True)
     
     try:

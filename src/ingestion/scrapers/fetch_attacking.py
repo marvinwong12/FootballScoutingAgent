@@ -14,7 +14,7 @@ def ingest_unified_attacking_data(season="2025"):
         "Ligue1": "FRA-Ligue 1"
     }
     
-    storage_dir = "./scout_cache"
+    storage_dir = "./data/scout_cache"
     os.makedirs(storage_dir, exist_ok=True)
     
     cols_to_show = [

@@ -1,0 +1,6 @@
+.git
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+data/scout_cache/

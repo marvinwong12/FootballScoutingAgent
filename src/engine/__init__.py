@@ -1,12 +1,6 @@
-"""
-Scout Engine Module
-Acts as the orchestration layer. It merges independent cached datasets (Understat, FBref) 
-and provides atomic data-access functions optimized for AI agents.
-"""
+# engine/__init__.py
 
 from .scout_engine import ScoutEngine
 
-# Exposes the ScoutEngine class to the rest of the workspace cleanly
-__all__ = [
-    "ScoutEngine"
-]
+# Explicitly define the public interface exported by this package folder
+__all__ = ["ScoutEngine"]

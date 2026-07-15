@@ -5,7 +5,7 @@ import urllib.request
 import pandas as pd
 
 def clean_and_purge_pipeline():
-    CACHE_DIR = "./scout_cache"
+    CACHE_DIR = "./data/scout_cache"
     # 💡 UPDATE: Pointing to your explicit raw data path
     kaggle_input = "./raw_data/contracts.csv"
     output_master_file = os.path.join(CACHE_DIR, "player_valuations_master.csv")

@@ -1,14 +1,16 @@
 """
-Data Ingestion Module
-Handles all direct scraping and data collection from external sources (Understat, FBref).
+Ingestion module initialization.
+Exposes data compilation pipelines and proprietary vector-database entrypoints.
 """
 
-from .fetch_attacking import ingest_unified_attacking_data
-from .fetch_defensive import ingest_unified_defensive_data
+from .compile_master import compile_master_dataset
+from .ingest_narratives import (
+    add_custom_scouting_report,
+    get_vector_collection
+)
 
-# The __all__ list explicitly defines what functions are exported when another file 
-# runs: `from src.ingestion import *`. It keeps your namespace clean and secure.
 __all__ = [
-    "ingest_unified_attacking_data",
-    "ingest_unified_defensive_data"
+    "compile_master_dataset",
+    "add_custom_scouting_report",
+    "get_vector_collection",
 ]

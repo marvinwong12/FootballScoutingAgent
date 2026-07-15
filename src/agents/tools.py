@@ -1,169 +1,372 @@
-import unicodedata
-import pandas as pd
+import os
+import uuid
+import json
+import base64
+import io
+import numpy as np
+import matplotlib.pyplot as plt
+from typing import List, Dict, Optional
+
 import chromadb
 from chromadb.utils import embedding_functions
-from langchain.tools import tool
-from src.engine.scout_engine import ScoutEngine 
+from matplotlib.font_manager import FontProperties  
+from mplsoccer import Radar
 
-# Instantiate the global engine instance that your tools use
+# --- LangChain Core & Community Imports ---
+from langchain_core.tools import tool
+from langchain_core.prompts import PromptTemplate
+from langchain_community.tools import DuckDuckGoSearchResults
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# --- Internal Project Imports ---
+from src import ScoutEngine 
+from src import normalize_name
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Instantiate the global internal engine reference
 _engine = ScoutEngine()
 
-# ==========================================
-# UNIVERSAL HELPER (Fast Lookup)
-# ==========================================
-def normalize_name(name: str) -> str:
-    """Instantly reduces any player name variation to a clean search key."""
-    if not isinstance(name, str): 
-        return str(name)
-    return unicodedata.normalize('NFKD', name).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+
+from mplsoccer import Radar
+from matplotlib.font_manager import FontProperties
+
+# Use standard system sans-serif fonts natively supported by matplotlib
+font_normal = FontProperties(family="sans-serif", size=11)
+font_bold = FontProperties(family="sans-serif", size=16, weight="bold")
 
 
 # ==========================================
-# 1. DATA ENGINE TOOLS (Structured Analytics)
+# 2. VECTOR DATA ACCESS LAYER
+# ==========================================
+class NarrativeRepository:
+    """
+    Singleton repository for vector database operations. 
+    Initializes the Chroma client and heavy embedding models exactly once.
+    """
+    def __init__(self):
+        # Dynamically calculate the project root to ensure safe pathing
+        current_file_path = os.path.abspath(__file__)
+        src_dir = os.path.dirname(os.path.dirname(current_file_path)) 
+        project_root = os.path.dirname(src_dir)
+        
+        # Point to the dedicated vector storage layer
+        self.db_path = os.path.join(project_root, "data/vector_store")
+        os.makedirs(self.db_path, exist_ok=True)
+        
+        # 1. Initialize persistent client once
+        self.client = chromadb.PersistentClient(path=self.db_path)
+        
+        # 2. Load embedding model into memory once
+        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+        
+        # 3. Connect to (or create) the collection
+        self.collection = self.client.get_or_create_collection(
+            name="player_narratives", 
+            embedding_function=self.embedding_fn
+        )
+
+    def get_narrative(self, clean_name: str) -> Optional[str]:
+        """Performs a fast O(1) vector metadata lookup."""
+        results = self.collection.get(where={"player_match_name": clean_name})
+        if results and results.get('documents') and len(results['documents']) > 0:
+            return results['documents'][0]
+        return None
+
+    def save_narrative(self, clean_name: str, original_name: str, dossier: str) -> None:
+        """Caches a newly generated narrative into the vector store."""
+        self.collection.add(
+            documents=[dossier],
+            metadatas=[{"player_match_name": clean_name, "original_name": original_name}],
+            ids=[str(uuid.uuid4())]
+        )
+
+# Initialize the global thread-safe repository singleton
+narrative_repo = NarrativeRepository()
+
+
+# ==========================================
+# 3. PRODUCTION REFINED LLM TOOLS
 # ==========================================
 @tool
 def search_player_tactical_tool(player_name: str) -> str:
     """
-    Searches the database for a specific player's statistical profile.
+    Searches the database for a specific football player's structural tactical profile and metrics.
+    Use this when you need detailed stats about a single named individual.
     """
     try:
-        # Load the database (which now has the pre-computed 'match_name' column)
-        df = pd.read_csv("./scout_cache/master_scouting_data.csv")
+        # Delegate entirely to the ScoutEngine
+        player_profile = _engine.lookup_player(player_name)
         
-        # Normalize ONLY the LLM's input (instantaneous)
-        clean_search_name = normalize_name(player_name)
-        
-        # Direct lookup! No expensive apply() functions needed.
-        player_data = df[df['match_name'] == clean_search_name]
-        
-        if player_data.empty:
-            return f"Could not find any data for {player_name}."
+        if isinstance(player_profile, str) and player_profile.startswith("No scout target found"):
+            return f"Strategic Lookup Notification: No profile found for '{player_name}' inside the scouting matrices."
             
-        # Clean up the output so the LLM doesn't get confused by duplicate name columns
-        player_data = player_data.drop(columns=['match_name'])
-        
-        return player_data.to_json(orient="records")
+        return json.dumps([player_profile], ensure_ascii=False)
         
     except Exception as e:
-        return f"Error reading database: {str(e)}"
+        return f"System Execution Error processing player profile query: {str(e)}"
 
 
 @tool
 def discovery_scout_tool(
     *,
-    position: str = None, 
-    max_value_millions: float = None, 
-    max_wage: float = None,  
-    max_age: int = None,
-    target_metric: str = None, 
-    min_metric_value: float = None,
+    position: Optional[str] = None,
+    league: Optional[str] = None,
+    nation: Optional[str] = None,
+    team: Optional[str] = None,
+    min_height: Optional[int] = None,
+    max_height: Optional[int] = None,
+    min_weight: Optional[int] = None,
+    max_weight: Optional[int] = None,
+    min_weak_foot: Optional[int] = None,
+    min_skill_moves: Optional[int] = None,
+    preferred_foot: Optional[str] = None,
+    max_value_millions: Optional[float] = None, 
+    max_wage: Optional[float] = None,  
+    max_age: Optional[int] = None,
+    target_metric: Optional[str] = None, 
+    min_metric_value: Optional[float] = None,
     sort_by_metric: str = "xg_per90",
     highest_first: bool = True
 ) -> str:
     """
-    Scans the global database to discover players matching budget, role, age, and wage limits.
-
-    Args:
-        position (str): Target role on the pitch (e.g., 'FW', 'MF', 'DF').
-        max_value_millions (float): Maximum transfer market budget ceiling in millions (e.g., 30.0).
-        max_wage (float): Maximum annual wage budget in Euros (e.g., 4000000).
-        max_age (int): Maximum player age ceiling (e.g., 25).
+    Scans the database to dynamically discover and rank hidden talent profiles matching financial, 
+    positional, geographic, biometric, and professional performance limits.
     """
-    query_filters = {}
-    if position: query_filters['position'] = position
-    if max_value_millions: query_filters['max_value_mln'] = max_value_millions
-    if max_wage: query_filters['max_wage'] = max_wage
-    if max_age: query_filters['max_age'] = max_age
+    try:
+        # 1. Map all arguments dynamically into a dictionary
+        # We let the ScoutEngine handle ALL column normalization and _per90 mapping.
+        query_filters = {
+            "position": position,
+            "league": league,
+            "nation": nation,
+            "team": team,
+            "min_height": min_height,
+            "max_height": max_height,
+            "min_weight": min_weight,
+            "max_weight": max_weight,
+            "min_weak_foot": min_weak_foot,
+            "min_skill_moves": min_skill_moves,
+            "preferred_foot": preferred_foot,
+            "max_value_mln": max_value_millions,
+            "max_wage": max_wage,
+            "max_age": max_age,
+        }
         
-    # Mapping custom filters dynamically to our unified engine keys
-    if target_metric and min_metric_value is not None:
-        metric_key = target_metric.lower().strip()
-        
-        # Financial and core demographic markers do not get a suffix
-        exempt_base_columns = ['market_value_mln', 'contract_expiry', 'annual_wage_eur', 'weekly_wage_eur', 'age']
-        if not metric_key.endswith('_per90') and metric_key not in exempt_base_columns:
-            metric_key = f"{metric_key}_per90"
-            
-        if 'goals_per90' in metric_key:
-            query_filters['min_goals_per90'] = min_metric_value
-        elif 'xg_per90' in metric_key:
-            query_filters['min_xg_per90'] = min_metric_value
-        else:
-            query_filters[f"min_{metric_key}"] = min_metric_value
+        # Dynamically append the requested target metric if provided
+        if target_metric and min_metric_value is not None:
+            query_filters[f"min_{target_metric}"] = min_metric_value
 
-    # Enforce clean sorting metrics
-    sort_column = sort_by_metric.lower().strip()
-    exempt_sort_columns = ['market_value_mln', 'contract_expiry', 'minutes', 'annual_wage_eur', 'age']
-    
-    if not sort_column.endswith('_per90') and sort_column not in exempt_sort_columns:
-        sort_column = f"{sort_column}_per90"
-
-    # Query the engine. Note: The engine should be returning data with the 
-    # 'match_name' column dropped or kept for display, but lookup is handled via the underlying DataFrame.
-    matches = _engine.discover_players(
-        filters=query_filters, 
-        sort_by=sort_column, 
-        ascending=(not highest_first), 
-        limit=3
-    )
-    
-    # LOOP BREAKER: Defensively halt recursive hallucination loops if zero data is found
-    if not matches or isinstance(matches, str) or len(matches) == 0:
-        return (
-            "CRITICAL: No players matching your exact tactical or financial constraints "
-            "were found in the database. Do not attempt this query again. Report directly "
-            "to the user that zero players matched these specific limits."
+        # 2. Delegate directly to the Engine
+        matches = _engine.discover_players(
+            filters=query_filters, 
+            sort_by=sort_by_metric, 
+            ascending=(not highest_first), 
+            limit=5
         )
         
-    return str(matches)
+        if not matches or (isinstance(matches, str) and "Error" in matches):
+            return (
+                "CRITICAL: Zero players matched your exact tactical or financial configuration filters. "
+                "Report back to the user that zero database rows satisfied these boundaries."
+            )
+        
+        # Return JSON. ScoutEngine already replaced NaNs with Nones, so it parses cleanly.
+        return json.dumps(matches, ensure_ascii=False)
+        
+    except Exception as e:
+        return f"System Execution Error filtering discovery matrices: {str(e)}"
+
+@tool
+def generate_percentile_comparison_chart(
+    player1_name: str,
+    player2_name: Optional[str] = None,
+    # Define metric groups suitable for different roles
+    metric_group: str = "attacking" # Default to common attacking comparison
+) -> str:
+    """
+    Generates a professional percentile-based radar/spider chart comparing one player 
+    or two players side-by-side. Returns the image as a base64 encoded PNG string.
+
+    Args:
+        player1_name: First player to visualize (required).
+        player2_name: Second player for side-by-side comparison (optional).
+        metric_group: 'attacking', 'defending', or 'comprehensive' profile.
+    """
+    try:
+        # 1. Define the metric sets (assumes engine pre-calculates percentiles as _pctl)
+        # 1. Define the metric sets using EXACT raw column names from your CSV
+        attacking_metrics = [
+            'goals_per90', 'xg_per90', 'shots_per90', 
+            'assists_per90', 'key_passes_per90', 'np_goals_per90', 
+            'np_xg_per90', 'xg_chain_per90'
+        ]
+        defending_metrics = [
+            'performance_tklw_per90', 'performance_int_per90', 'ball_recoveries_per90', 
+            'performance_fls_per90', 'performance_crdy_per90', 'xg_buildup_per90'
+        ]
+        comprehensive_metrics = attacking_metrics + defending_metrics
+
+        if metric_group.lower() == "defending":
+            active_metrics = defending_metrics
+        elif metric_group.lower() == "comprehensive":
+            active_metrics = comprehensive_metrics
+        else:
+            active_metrics = attacking_metrics # Default
+            
+        # 2. Delegate data lookup and dynamic percentile calculation to the Engine
+        pctl_data1 = _engine.get_player_percentiles(player1_name, active_metrics)
+        if not pctl_data1:
+            return f"Strategic Notification: Data lookup failure for primary player '{player1_name}'."
+            
+        pctl_values1 = list(pctl_data1.values())
+        param_labels = [label.title().replace('_', ' ') for label in pctl_data1.keys()]
+
+        # 3. Handle comparison player data optionally
+        pctl_values2 = None
+        player2_label = "Average Player"
+        if player2_name:
+            pctl_data2 = _engine.get_player_percentiles(player2_name, active_metrics)
+            if pctl_data2:
+                pctl_values2 = list(pctl_data2.values())
+                player2_label = player2_name.upper()
+
+        # 4. Generate the Chart via mplsoccer (isolated plotting logic)
+        num_vars = len(active_metrics)
+        angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+
+        # The radar is circular, so close the loop by appending the start value
+        pctl_values1 += pctl_values1[:1]
+        if pctl_values2:
+            pctl_values2 += pctl_values2[:1]
+        angles += angles[:1]
+        param_labels += param_labels[:1] # Close the label loop for the spider look
+
+        fig, ax = plt.subplots(figsize=(12, 12), subplot_kw=dict(polar=True))
+        ax.set_theta_offset(np.pi / 2) # Start at the top center
+        ax.set_theta_direction(-1) # Clockwise
+        
+        # Configure the percentile grid rings (0-100)
+        ax.set_rgrids([25, 50, 75, 90, 99], labels=["25", "50", "75", "90", "99"], 
+                     color="grey", size=10, fontproperties=font_normal)
+        ax.set_ylim(0, 100)
+        
+        # Configure and rotate metric labels
+        ax.set_xticks(angles[:-1])
+        # Calculate label rotations dynamically for dynamic metric counts
+        label_angles = [float(angle * 180 / np.pi) for angle in angles[:-1]]
+        ax.set_xticklabels(param_labels[:-1], color='black', size=12, 
+                          fontproperties=font_normal)
+        for label, angle in zip(ax.get_xticklabels(), label_angles):
+            label.set_rotation(angle - 180)
+
+        # Plot Player 1 (Attacking colors)
+        ax.plot(angles, pctl_values1, color='#1A78CF', linewidth=2, linestyle='solid')
+        ax.fill(angles, pctl_values1, color='#1A78CF', alpha=0.25)
+        
+        # Plot Player 2 if provided (Defending colors)
+        if pctl_values2:
+            ax.plot(angles, pctl_values2, color='#CF4C1A', linewidth=2, linestyle='solid')
+            ax.fill(angles, pctl_values2, color='#CF4C1A', alpha=0.15)
+        else:
+            # Fallback: Plot average line explicitly at 50%
+            ax.plot(angles, [50] * len(angles), color='#CCCCCC', linewidth=1, linestyle='dashed')
+
+        # Formatting titles, legends, and styling
+        comparison_text = f" vs. {player2_label}" if pctl_values2 else " - Solo Profile"
+        title_text = f"{player1_name.upper()}{comparison_text}\n{metric_group.title()} Percentile Comparison"
+        
+        fig.text(0.5, 0.95, title_text, ha='center', color='black', fontproperties=font_bold)
+        
+        if pctl_values2:
+            # Side-by-side Legend
+            fig.text(0.35, 0.05, player1_name.upper(), color='#1A78CF', fontproperties=font_bold)
+            fig.text(0.5, 0.05, "vs.", color='black', fontproperties=font_normal)
+            fig.text(0.55, 0.05, player2_label.upper(), color='#CF4C1A', fontproperties=font_bold)
+        else:
+            # Solo Profile disclaimer
+            fig.text(0.5, 0.05, "Dashed line represents performance at the 50th percentile.", 
+                     ha='center', color='#888888', fontproperties=font_normal)
+            
+        fig.text(0.95, 0.02, "[Source: Master Scouting CSV]", ha='right', color='#888888', 
+                 fontproperties=font_normal)
+        
+        # 5. Output Management: Convert the matplotlib plot directly to a clean Base64 string
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=120)
+        plt.close(fig)
+        
+        # Base64 Encode the raw binary data
+        b64_string = base64.b64encode(buf.getvalue()).decode('utf-8')
+        buf.close() # Clean memory
+
+        return json.dumps({"image_b64": b64_string}, ensure_ascii=False)
+
+    except Exception as e:
+        return f"System Execution Error generating analytical comparison visualization: {str(e)}"
 
 
 # ==========================================
-# 2. BEHAVIORAL ANALYST TOOLS (The RAG Component)
+# 4. BEHAVIORAL ANALYST TOOLS (The RAG Component)
 # ==========================================
 @tool
 def query_player_narrative_tool(player_name: str) -> str:
     """
-    Retrieves qualitative scouting insights, medical/injury history, 
-    character assessments, and tactical profiles for a specific football player.
-    Always query this tool to check for background risks after finding potential targets.
+    Queries the local vector database for qualitative scouting profiles concerning 
+    a player's character, leadership, temperament, and background.
     """
+    if "GEMINI_API_KEY" not in os.environ and "GOOGLE_API_KEY" in os.environ:
+        os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+        
+    clean_name = normalize_name(player_name)
+    
+    # 1. Query the unified repository layer
+    cached_dossier = narrative_repo.get_narrative(clean_name)
+    
+    if cached_dossier:
+        return f"--- LOCAL DOSSIER FOR {player_name.upper()} ---\n\n{cached_dossier}"
+        
+    # 2. Cache MISS: Trigger autonomous search
     try:
-        # Connect to the local database
-        chroma_client = chromadb.PersistentClient(path="./scout_cache/vector_db")
-        embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-        collection = chroma_client.get_collection(name="player_narratives", embedding_function=embedding_fn)
+        search = DuckDuckGoSearchResults(max_results=4)
+        raw_web_data = search.run(f"{player_name} football character personality attitude injury")
         
-        # THE ARCHITECTURE FIX: One instant normalization on the incoming target parameter
-        clean_search_name = normalize_name(player_name)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3)
         
-        # Query matching the exact pre-calculated identity key stored during ingestion
-        results = collection.get(
-            where={"player_match_name": clean_search_name}
+        prompt = PromptTemplate(
+            input_variables=["player_name", "web_context"],
+            template="""
+            You are a senior executive director of football intelligence. 
+            Synthesize the provided raw internet search results into a concise 4-sentence 
+            qualitative intelligence profile for {player_name}.
+            
+            Structure the dossier precisely like this:
+            - Sentence 1: General career/tactical context and current status.
+            - Sentence 2: Deep dive into character, leadership traits, or dressing room presence.
+            - Sentence 3: Known injury risks, temperament flags, or physical robustness.
+            - Sentence 4: Summary recommendation on their psychological profile.
+            
+            RAW WEB DATA CONTEXT:
+            {web_context}
+            """
         )
         
-        if results and results['documents'] and len(results['documents']) > 0:
-            return f"--- QUALITATIVE SCOUTING REPORT FOR {player_name.upper()} ---\n{results['documents'][0]}"
-            
-        # Semantic fallback: If metadata misses, evaluate similarity against the pre-compiled lookup key
-        semantic_results = collection.query(
-            query_texts=[f"injury history tactical character profile for {clean_search_name}"],
-            n_results=1
-        )
-        if semantic_results and semantic_results['documents'] and len(semantic_results['documents'][0]) > 0:
-            return f"--- RELATED NARRATIVE MATCH FOR {player_name.upper()} ---\n{semantic_results['documents'][0][0]}"
-            
-        return f"No qualitative injury or character reports found in local text database for '{player_name}'."
+        chain = prompt | llm
+        generated_dossier = chain.invoke({"player_name": player_name, "web_context": raw_web_data}).content
+        
+        # Cache it to the vector store
+        narrative_repo.save_narrative(clean_name, player_name, generated_dossier)
+        
+        return f"--- NEWLY RECONSTRUCTED DOSSIER FOR {player_name.upper()} (Now Cached) ---\n\n{generated_dossier}"
         
     except Exception as e:
-        return f"Error querying local vector storage: {str(e)}"
+        return f"Failed to fetch or cache qualitative narrative data dynamically for {player_name}: {str(e)}"
 
-
-# ==========================================
-# TOOL REGISTRATION MATRIX
-# ==========================================
+# Export for LangGraph Supervisor integration
 SCOUT_TOOLS = [
     search_player_tactical_tool,
     discovery_scout_tool,
-    query_player_narrative_tool
+    query_player_narrative_tool,
+    generate_percentile_comparison_chart
 ]

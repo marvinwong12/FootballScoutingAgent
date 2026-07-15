@@ -217,4 +217,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-scout_cache/
+data/
+*.csv
+*.xlsx
+*.sqlite
+*.db
+
+data/scout_cache/
+
+.docker/

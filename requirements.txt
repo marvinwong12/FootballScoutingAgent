@@ -1,19 +1,11 @@
-# Data Science & Core
-numpy==1.26.4
-pandas==2.2.2
-scikit-learn==1.5.0
-openpyxl
-
-# Scraping & Data Engine
+chromadb==1.5.9
+langchain_community==0.4.2
+langchain_core==1.4.9
+langchain_google_genai==4.2.7
+langgraph==1.2.9
+matplotlib==3.11.0
+mplsoccer==1.6.1
+numpy==2.5.1
+pandas==3.0.3
+python-dotenv==1.2.2
 soccerdata==1.9.0
-
-# Multi-Agent Orchestration & LLM Layer
-langgraph>=0.0.10
-langchain-google-genai>=2.0.0
-langchain-core>=0.2.0
-python-dotenv==1.0.1
-
-# Quality Assurance & Testing
-pytest>=8.2.0
-pluggy==1.6.0
-pre-commit==4.6.0
