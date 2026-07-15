@@ -1,4 +1,5 @@
 import os
+import sqlite3 
 import pandas as pd
 from typing import List, Dict, Optional
 from src import normalize_name
@@ -7,7 +8,7 @@ class ScoutEngine:
     def __init__(self, cache_dir: str = None):
         """
         Initializes the analytical discovery query engine using the pre-compiled 
-        master file as a read-only memory asset.
+        SQLite table as a read-only memory asset.
         """
         # 1. Dynamically calculate the project root FIRST so it's always available
         current_file_path = os.path.abspath(__file__)          # src/engine/scout_engine.py
@@ -20,23 +21,26 @@ class ScoutEngine:
         else:
             self.cache_dir = cache_dir
             
-        # 3. Secure the absolute path to the compiled database asset
-        self.master_path = os.path.join(project_root, "data/scout_cache/master_scouting_data.csv")
+        # 3. Secure the absolute path to the compiled SQLite database asset
+        self.db_path = os.path.join(project_root, "data/scout_cache/scout_platform.db")
         
         self._df = None
         self._load_master_cache()
 
     def _load_master_cache(self):
-        """Loads data cleanly into memory once to provide high-speed execution profiles."""
-        if os.path.exists(self.master_path):
-            self._df = pd.read_csv(self.master_path)
-            print(f"[Engine Activated] Loaded warm master matrix cache. Context Matrix Shape: {self._df.shape}")
+        """Loads data cleanly into memory from SQLite once to provide high-speed execution profiles."""
+        if os.path.exists(self.db_path):
+            # Query the database and load the 'players' table into memory
+            with sqlite3.connect(self.db_path) as conn:
+                self._df = pd.read_sql_query("SELECT * FROM players", conn)
+            print(f"[Engine Activated] Loaded warm master matrix cache from SQLite. Context Matrix Shape: {self._df.shape}")
         else:
-            print(f"⚠️ Runtime Warning: Final master database file not found at {self.master_path}.")
+            print(f"⚠️ Runtime Warning: SQLite database file not found at {self.db_path}.")
             print("Please run `src/ingestion/structured/compile_master.py` first to generate data assets.")
             self._df = pd.DataFrame()
 
-        self._df['match_name'] = self._df['player'].apply(normalize_name)
+        if not self._df.empty:
+            self._df['match_name'] = self._df['player'].apply(normalize_name)
 
     def lookup_player(self, player_name: str) -> dict or str:
         """

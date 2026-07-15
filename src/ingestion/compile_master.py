@@ -1,5 +1,6 @@
 # src/ingestion/structured/compile_master.py
 import os
+import sqlite3 
 import pandas as pd
 from src.engine.aliases_config import MANUAL_ALIASES
 from src import normalize_name
@@ -10,12 +11,14 @@ def compile_master_dataset(cache_dir: str, understat_season: str = "2025", fbref
     """
     Ingests raw performance, valuation, and tactical attributes, 
     resolves player identities, standardizes metrics, and saves a strictly-typed 
-    master file using 'player' as the unique unified tracking key.
+    master file to an SQLite database.
     """
     os.makedirs(cache_dir, exist_ok=True)
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     
-    master_path = os.path.join(project_root, "data/scout_cache/master_scouting_data.csv")
+    # <--- CHANGE TO .db PATH
+    db_path = os.path.join(project_root, "data", "scout_cache", "scout_platform.db") 
+    
     sofifa_path = os.path.join(cache_dir, "sofifa_fc26_ratings.csv")
     
     attacking_file = os.path.join(cache_dir, f"understat_attacking_big5_{understat_season}.csv")
@@ -227,9 +230,11 @@ def compile_master_dataset(cache_dir: str, understat_season: str = "2025", fbref
     # Drop the raw volume metrics to strictly enforce Per-90 analysis
     master_df = master_df.drop(columns=cols_to_drop)
 
-    master_df.to_csv(master_path, index=False)
-    print(f"🎯 Master dataset successfully compiled! Target: {master_path} (Shape: {master_df.shape})")
-    return master_path
+    with sqlite3.connect(db_path) as conn:
+        master_df.to_sql("players", conn, if_exists="replace", index=False)
+
+    print(f"🎯 Master dataset successfully compiled to SQL! Target: {db_path} (Shape: {master_df.shape})")
+    return db_path
 
 if __name__ == "__main__":
     # Allows developers to run ingestion on demand via command line

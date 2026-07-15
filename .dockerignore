@@ -1,6 +1,18 @@
-.git
+# Exclude the massive python virtual environment
+.venv/
+venv/
+env/
+
+# Exclude your local database caches and scraped data
+data/
+*.csv
+*.xlsx
+*.sqlite
+*.db
+
+# Exclude system and testing caches
 __pycache__/
 *.pyc
-.env
 .pytest_cache/
-data/scout_cache/
+.git/
+.DS_Store

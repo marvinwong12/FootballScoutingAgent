@@ -289,8 +289,7 @@ def generate_percentile_comparison_chart(
             fig.text(0.5, 0.05, "Dashed line represents performance at the 50th percentile.", 
                      ha='center', color='#888888', fontproperties=font_normal)
             
-        fig.text(0.95, 0.02, "[Source: Master Scouting CSV]", ha='right', color='#888888', 
-                 fontproperties=font_normal)
+        fig.text(0.95, 0.02, "[Source: SQLite Master Database]", ha='right', color='#888888', fontproperties=font_normal)
         
         # 5. Output Management: Convert the matplotlib plot directly to a clean Base64 string
         buf = io.BytesIO()
