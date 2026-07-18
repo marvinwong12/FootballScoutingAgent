@@ -306,6 +306,7 @@ numpy==2.5.1
     #   seaborn
     #   sentence-transformers
     #   streamlit
+    #   torchvision
     #   transformers
 oauthlib==3.3.1
     # via requests-oauthlib
@@ -387,6 +388,7 @@ pillow==12.3.0
     #   matplotlib
     #   mplsoccer
     #   streamlit
+    #   torchvision
 platformdirs==4.10.1
     # via seleniumbase
 pluggy==1.6.0
@@ -608,7 +610,12 @@ tokenizers==0.22.2
 toml==0.10.2
     # via streamlit
 torch==2.13.0
-    # via sentence-transformers
+    # via
+    #   -r requirements.in
+    #   sentence-transformers
+    #   torchvision
+torchvision==0.28.0
+    # via -r requirements.in
 tqdm==4.69.0
     # via
     #   chromadb

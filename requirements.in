@@ -11,5 +11,7 @@ python-dotenv
 soccerdata
 ddgs
 sentence-transformers
+torch
+torchvision
 streamlit
 Pillow
