@@ -2,7 +2,7 @@ import os
 import uuid
 import chromadb
 from chromadb.utils import embedding_functions
-from src import normalize_name 
+from src.helper_functions import normalize_name
 
 def get_vector_collection():
     """Helper to safely resolve the database path and return the collection."""

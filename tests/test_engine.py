@@ -58,7 +58,7 @@ class TestScoutEngine(unittest.TestCase):
 
     def test_league_canonical_mapping(self):
         """Verify text normalization correctly translates long-form string variations."""
-        filters = {"league": "Premier League"}
+        filters = {"league": "Ligue 1"}
         results = self.engine.discover_players(filters=filters, limit=5)
         
         for player in results:

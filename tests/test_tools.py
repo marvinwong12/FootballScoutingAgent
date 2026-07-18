@@ -1,6 +1,8 @@
 import unittest
 import json
 from unittest.mock import patch, MagicMock
+import base64
+import os
 
 # Import the tools from your newly refactored file
 from src.agents import (
@@ -99,23 +101,46 @@ class TestScoutTools(unittest.TestCase):
             self.assertTrue(len(data["image_b64"]) > 100, "Base64 string is too short to be a valid PNG.")
 
     def test_generate_comparison_chart_side_by_side(self):
-        """Test generating a side-by-side percentile chart for two players."""
+        """Test generating a side-by-side percentile chart for two players and save to root."""
         # Invoke with both players and a different metric group
         result = generate_percentile_comparison_chart.invoke({
-            "player1_name": "Kylian Mbappe",
+            "player1_name": "Joao Pedro",
             "player2_name": "Erling Haaland",
             "metric_group": "comprehensive"
         })
         
         self.assertIsInstance(result, str, "Tool must return a string.")
         
-        # Check that it didn't hit a data lookup failure or a system crash
-        if "Strategic Notification" not in result and "System Execution Error" not in result:
-            data = json.loads(result)
+        # Fail early if the engine couldn't find the players or threw a script error
+        if "Strategic Notification" in result:
+            self.fail(f"Tool returned a data lookup failure: {result}")
+        if "System Execution Error" in result:
+            self.fail(f"Tool crashed during execution: {result}")
             
-            # Assert the JSON structure and basic validity of the Base64 image
-            self.assertIn("image_b64", data, "JSON output must contain 'image_b64' key.")
-            self.assertIsInstance(data["image_b64"], str, "Base64 payload must be a string.")
-            self.assertTrue(len(data["image_b64"]) > 100, "Base64 string is too short to be a valid PNG.")
+        # Parse the valid JSON output
+        data = json.loads(result)
+        
+        # Assert the JSON structure and basic validity of the Base64 image
+        self.assertIn("image_b64", data, "JSON output must contain 'image_b64' key.")
+        self.assertIsInstance(data["image_b64"], str, "Base64 payload must be a string.")
+        self.assertTrue(len(data["image_b64"]) > 100, "Base64 string is too short to be a valid PNG.")
+        
+        # --- SAVE IMAGE TO ROOT FOR VISUAL INSPECTION ---
+        try:
+            # Extract and decode the raw binary image data
+            image_bytes = base64.b64decode(data["image_b64"])
+            
+            # Define output path to the project root directory
+            output_filename = "test_comparison_chart.png"
+            
+            with open(output_filename, "wb") as f:
+                f.write(image_bytes)
+                
+            print(f"\n======== TEST SUCCESS ========")
+            print(f"Visual validation chart successfully saved to your project root as: {os.path.abspath(output_filename)}")
+            print(f"==============================\n")
+            
+        except Exception as e:
+            self.fail(f"Failed to decode base64 or write the PNG file to disk: {str(e)}")
 if __name__ == '__main__':
     unittest.main()

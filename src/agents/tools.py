@@ -15,12 +15,12 @@ from mplsoccer import Radar
 # --- LangChain Core & Community Imports ---
 from langchain_core.tools import tool
 from langchain_core.prompts import PromptTemplate
-from langchain_community.tools import DuckDuckGoSearchResults
+from langchain_community.tools.ddg_search.tool import DuckDuckGoSearchResults
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # --- Internal Project Imports ---
 from src import ScoutEngine 
-from src import normalize_name
+from src.helper_functions import normalize_name
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -38,7 +38,7 @@ font_bold = FontProperties(family="sans-serif", size=16, weight="bold")
 
 
 # ==========================================
-# 2. VECTOR DATA ACCESS LAYER
+# 1. VECTOR DATA ACCESS LAYER
 # ==========================================
 class NarrativeRepository:
     """
@@ -87,7 +87,7 @@ narrative_repo = NarrativeRepository()
 
 
 # ==========================================
-# 3. PRODUCTION REFINED LLM TOOLS
+# 2. PRODUCTION REFINED LLM TOOLS
 # ==========================================
 @tool
 def search_player_tactical_tool(player_name: str) -> str:
@@ -292,18 +292,20 @@ def generate_percentile_comparison_chart(
         fig.text(0.95, 0.02, "[Source: SQLite Master Database]", ha='right', color='#888888', fontproperties=font_normal)
         
         # 5. Output Management: Convert the matplotlib plot directly to a clean Base64 string
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight', dpi=120)
+        # Create a clean filename
+        safe_name = player1_name.replace(" ", "_").lower()
+        filename = f"{safe_name}_radar.png"
+        filepath = os.path.join(os.getcwd(), filename)
+        
+        # Save the figure directly to the docker workspace
+        plt.savefig(filepath, format='png', bbox_inches='tight', dpi=120)
         plt.close(fig)
         
-        # Base64 Encode the raw binary data
-        b64_string = base64.b64encode(buf.getvalue()).decode('utf-8')
-        buf.close() # Clean memory
-
-        return json.dumps({"image_b64": b64_string}, ensure_ascii=False)
-
+        # Return a TINY footprint string to the LLM so it doesn't crash
+        return json.dumps({"image_file": filename}, ensure_ascii=False)
+        
     except Exception as e:
-        return f"System Execution Error generating analytical comparison visualization: {str(e)}"
+        return f"System Execution Error: {str(e)}"
 
 
 # ==========================================
@@ -360,7 +362,12 @@ def query_player_narrative_tool(player_name: str) -> str:
         return f"--- NEWLY RECONSTRUCTED DOSSIER FOR {player_name.upper()} (Now Cached) ---\n\n{generated_dossier}"
         
     except Exception as e:
-        return f"Failed to fetch or cache qualitative narrative data dynamically for {player_name}: {str(e)}"
+        import traceback
+        print(f"\n🚨 TOOL CRASH DETECTED IN NARRATIVE SEARCH 🚨")
+        print(f"Error Type: {type(e)}")
+        print(f"Details: {str(e)}")
+        traceback.print_exc()
+        return f"System Error: Failed to execute tool due to {str(e)}"
 
 # Export for LangGraph Supervisor integration
 SCOUT_TOOLS = [

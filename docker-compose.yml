@@ -4,12 +4,10 @@ services:
   scout-platform:
     build: .
     volumes:
-      # Maps your local codebase to the container's working directory
       - .:/app
-      # Anonymous volume prevents your local pycache from conflicting with Docker's pycache
-      - /app/__pycache__
+    ports:
+      - "8501:8501"
     env_file:
       - .env
-    # Keeps the container shell active so you can trigger commands
-    stdin_open: true
-    tty: true
+    environment:
+      - GOOGLE_API_KEY=${GEMINI_API_KEY}

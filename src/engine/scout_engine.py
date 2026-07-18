@@ -2,7 +2,7 @@ import os
 import sqlite3 
 import pandas as pd
 from typing import List, Dict, Optional
-from src import normalize_name
+from src.helper_functions import normalize_name
 
 class ScoutEngine:
     def __init__(self, cache_dir: str = None):
@@ -104,15 +104,23 @@ class ScoutEngine:
         # League Canonical Mapping
         if 'league' in filters and filters['league']:
             league_query = str(filters['league']).lower().strip()
+            
+            # Normalize variations down to what your dataframe columns expect
             if league_query in ['epl', 'premier league', 'english premier league', 'england premier league']:
                 league_query = 'epl'
             elif league_query in ['la liga', 'laliga', 'primera division']:
-                league_query = 'la liga'
-            elif league_query in ['serie a', 'seriea']:
-                league_query = 'serie a'
+                league_query = 'laliga'  # Unified mapping to match dataframe
+            elif league_query in ['serie a', 'seriea', 'serie a enilive']:
+                league_query = 'seriea'  # Maps cleanly to 'SerieA' after .lower()
+            elif league_query in ['ligue 1', 'ligue1', "ligue 1 mcdonald's", 'ligue 1 mcdonalds']:
+                league_query = 'ligue1'  # 👈 Added translation for France
+            elif league_query in ['bundesliga', '1. bundesliga', 'german bundesliga']:
+                league_query = 'bundesliga'  # 👈 Added translation for Germany
                 
             if 'league' in df.columns:
-                df = df[df['league'].astype(str).str.lower().str.strip() == league_query]
+                # FIX: Strip out all spaces from the dataframe column values during comparison
+                # to prevent mismatches between things like 'LaLiga' vs 'La Liga'
+                df = df[df['league'].astype(str).str.replace(" ", "").str.lower().str.strip() == league_query]
                 
         # 2. Financial & Demographic Parameters
         if 'max_value_mln' in filters and filters['max_value_mln']:
@@ -193,8 +201,12 @@ class ScoutEngine:
         from src.helper_functions import normalize_name
         clean_name = normalize_name(player_name)
         
-        # 1. Find the target player
-        result = self._df[self._df['player'] == clean_name]
+        # 1. Find the target player using the pre-calculated normalized column
+        result = self._df[self._df['match_name'] == clean_name]
+        
+        # Fallback Substring Match (Exactly like your regular lookup does)
+        if result.empty:
+            result = self._df[self._df['match_name'].str.contains(clean_name, na=False)]
         
         if result.empty:
             return None

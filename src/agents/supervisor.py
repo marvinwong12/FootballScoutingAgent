@@ -10,6 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from src.agents.tools import SCOUT_TOOLS
+from langchain_core.messages import trim_messages
 
 # Load the API key from your hidden .env file
 load_dotenv()
@@ -65,16 +66,32 @@ def build_chief_scout():
     # In-memory checkpointer to persist conversation state/threads seamlessly
     checkpointer = MemorySaver()
 
+    def state_trimmer_modifier(state) -> list:
+        """Intercepts agent state and trims old messages before calling Gemini."""
+        trimmed = trim_messages(
+            state["messages"],
+            max_tokens=150000,          # Set comfortably below Gemini's 250k minute limit
+            strategy="last",            # Keep the most recent conversation context
+            token_counter=len,          # Approximates by message count, or pass a proper tokenizer
+            start_on="human",           # Assures valid chat API structure
+            include_system=False,       # We inject our specific system_prompt below instead
+            allow_partial=True,
+        )
+        
+        # Prepend the system instructions so the model always remembers its role
+        return [("system", system_prompt)] + trimmed
+
     # Create the compilation graph engine
     app = create_react_agent(
         model=llm,
         tools=SCOUT_TOOLS,
-        prompt=system_prompt,
-        checkpointer=checkpointer 
+        checkpointer=checkpointer,
+        prompt=state_trimmer_modifier
     )
     
     return app
 
+scout_app = build_chief_scout()
 
 # ==========================================
 # LOCAL TESTING LOOP
@@ -82,7 +99,6 @@ def build_chief_scout():
 if __name__ == "__main__":
     print("Initializing Stateful LangGraph Chief Scout...")
     
-    scout_app = build_chief_scout()
     print("Agent is online! Memory system activated. Type 'quit' to exit.\n")
     
     session_config = {"configurable": {"thread_id": "scout_terminal_session_alpha"}}

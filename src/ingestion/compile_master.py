@@ -3,7 +3,7 @@ import os
 import sqlite3 
 import pandas as pd
 from src.engine.aliases_config import MANUAL_ALIASES
-from src import normalize_name
+from src.helper_functions import normalize_name
 import difflib
 from typing import List, Dict, Optional
 
