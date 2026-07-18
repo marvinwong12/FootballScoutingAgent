@@ -6,7 +6,7 @@ langgraph==1.2.9
 matplotlib==3.11.0
 mplsoccer==1.6.1
 numpy==2.5.1
-pandas==3.0.3
+pandas==2.2.3
 python-dotenv==1.2.2
 soccerdata==1.9.0
 ddgs==9.14.4
