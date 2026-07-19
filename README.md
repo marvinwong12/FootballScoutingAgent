@@ -14,7 +14,7 @@ The platform is fully containerized and hosted in production via Streamlit Commu
 
 ## Application in Action
 
-<video src="assets/AgentRecording.mp4" autoplay loop muted playsinline width="100%"></video>
+<video src="[assets/AgentRecording.mp4](https://github.com/user-attachments/assets/3e4e798e-5c5f-49ad-952d-c7d905c6e030)" autoplay loop muted playsinline width="100%"></video>
 
 *Figure 1: Demonstration of natural language query processing, automated tool execution, and dynamic in-memory chart generation.*
 
